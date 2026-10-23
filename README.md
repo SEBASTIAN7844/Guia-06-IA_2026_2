@@ -1,7 +1,7 @@
 # Práctica 06: Redes Recurrentes (RNN y LSTM) en PyTorch
 
 **Curso:** Inteligencia Artificial / Aprendizaje Profundo
-**Alumno:** Rodrigo Fabricio Auccapiña Bombilla
+**Alumno:** Rodrigo Fabricio Auccapiña Bombilla, Luz Dioneth Rodriguez Castro, Aderly Aldair Huilca Monterola, Andy Sebastian Tapia Palomino
 **Escuela Profesional de Ingeniería de Sistemas, Universidad Andina del Cusco**
 
 ## Objetivo
@@ -81,33 +81,50 @@ Mayor capacidad no implica mejor resultado: para una senoide de una sola variabl
 
 Resultados obtenidos (RNN simple):
 
-| SEQ_LEN | Loss época 10 | Loss época 30 | Loss época 50 |
-|---|---|---|---|
-| 10 | _completar_ | _completar_ | _completar_ |
-| 50 | _completar_ | _completar_ | _completar_ |
+| SEQ_LEN | Época 10 | Época 20 | Época 30 | Época 40 | Época 50 |
+|---|---|---|---|---|---|
+| 10 | 0.037427 | 0.007305 | 0.005172 | 0.001861 | 0.001441 |
+| 50 | 0.034288 | 0.004116 | **0.005229** | 0.000936 | **0.000668** |
 
 ![Actividad 3](resultados/actividad3_seq_len.png)
 
-**Análisis.** _(ajustar a lo observado)_ Al pasar de 10 a 50 pasos, el gradiente debe retropropagarse a través de 50 multiplicaciones sucesivas por `W_hh` y por la derivada de `tanh` (BPTT). Como esa derivada es menor o igual a 1, el producto tiende a cero y los primeros pasos de la ventana casi no influyen en la actualización de los pesos: es la "amnesia matemática" de los gradientes desvanecientes. En la práctica esto se observa como una pérdida que baja más lento, con más oscilaciones o que se estanca en un valor mayor que con SEQ_LEN = 10.
+**Análisis.** El resultado no fue el que anticipa la teoría: con SEQ_LEN = 50 la RNN terminó con una pérdida **menor** (0.000668 frente a 0.001441). Sin embargo, el entrenamiento fue **menos estable**: entre las épocas 20 y 30 la pérdida subió de 0.004116 a 0.005229 en lugar de seguir bajando. Ese salto es un síntoma típico de gradientes mal condicionados al retropropagar a través de 50 pasos (BPTT), donde el gradiente se multiplica 50 veces por `W_hh` y por la derivada de `tanh`.
+
+La razón de que, aun así, la ventana larga funcione mejor es la naturaleza de la tarea. Para predecir el siguiente punto de una senoide, la información decisiva está en los **últimos** pasos de la ventana, justo los que la RNN recuerda bien. El desvanecimiento del gradiente borra la influencia de los primeros pasos, pero aquí esos pasos no son necesarios. Además, con un paso de muestreo de 50/599 ≈ 0.083, una ventana de 10 pasos cubre solo 0.83 rad de la onda, mientras que una de 50 cubre unos 4.2 rad, casi un ciclo completo, lo que da más contexto para ubicar la fase. Es decir, la "amnesia matemática" existe, pero solo perjudica cuando el objetivo depende de eventos lejanos, y esta serie no lo exige.
 
 ## Reto: RNN simple vs LSTM con SEQ_LEN = 50
 
-| Modelo | Parámetros | Loss final (época 50) | MSE de predicción |
+| Época | RNN simple | LSTM |
+|---|---|---|
+| 10 | 0.034288 | 0.081893 |
+| 20 | 0.004116 | 0.028083 |
+| 30 | 0.005229 | 0.008541 |
+| 40 | 0.000936 | 0.002292 |
+| 50 | **0.000668** | 0.001182 |
+
+| Modelo | Parámetros | Loss final | MSE de predicción |
 |---|---|---|---|
-| RNN simple | 321 | _completar_ | _completar_ |
-| LSTM | 1 233 | _completar_ | _completar_ |
+| RNN simple | 321 | 0.000668 | **0.000812** |
+| LSTM | 1 233 | 0.001182 | 0.001212 |
 
 ![Curvas de pérdida](resultados/reto_loss_rnn_vs_lstm.png)
 
 ![Predicciones](resultados/reto_predicciones.png)
 
-**Análisis.** _(ajustar a lo observado)_ La LSTM evita el desvanecimiento porque su estado de celda se actualiza de forma aditiva (`c_t = f_t ⊙ c_{t-1} + i_t ⊙ g_t`): cuando la compuerta de olvido está cerca de 1, el gradiente fluye hacia atrás sin multiplicarse repetidamente por factores pequeños. Por eso se espera que la LSTM alcance una pérdida menor y una curva de predicción que siga mejor a la serie real.
+**Resultado.** Bajo condiciones idénticas (misma semilla, 50 épocas, Adam con lr = 0.01), la **RNN simple se ajustó mejor** a la serie: su MSE de predicción fue 0.000812, frente a 0.001212 de la LSTM. Aun así, ambos errores son muy pequeños para una señal de amplitud 1, y las dos curvas de predicción siguen de cerca a la serie real.
 
-Hay dos matices que conviene reportar con honestidad. Primero, la LSTM tiene casi 4 veces más parámetros, así que parte de la ventaja puede venir de su mayor capacidad y no solo de las compuertas. Segundo, con solo 50 épocas la LSTM puede arrancar más lento en las primeras épocas (tiene más pesos que ajustar) y superar a la RNN recién hacia el final; y como una senoide es una señal muy regular, la diferencia puede ser moderada. Con series que dependan de eventos lejanos la brecha sería mayor.
+**Análisis crítico.** Que la LSTM no supere a la RNN no contradice la teoría; muestra sus condiciones de aplicación:
+
+1. **La tarea no exige memoria de largo plazo.** La ventaja de la LSTM está en su estado de celda, que se actualiza de forma aditiva (`c_t = f_t ⊙ c_{t-1} + i_t ⊙ g_t`) y permite que el gradiente viaje muchos pasos hacia atrás sin desvanecerse. Pero, como se vio en la actividad 3, predecir el siguiente punto de una senoide depende sobre todo de los pasos recientes, que la RNN ya maneja bien. La LSTM paga el costo de sus compuertas sin aprovechar su beneficio.
+2. **La LSTM converge más lento.** Tiene casi 4 veces más parámetros (1 233 frente a 321) y, al inicio, sus compuertas sigmoides valen alrededor de 0.5, lo que atenúa la señal hasta que aprenden a abrirse. Por eso su pérdida en la época 10 (0.081893) es más del doble que la de la RNN.
+3. **50 épocas no bastan para la LSTM.** Su pérdida seguía bajando con claridad al final (de 0.002292 a 0.001182 en las últimas 10 épocas), mientras que su curva es en cambio **más suave y monótona**: no presenta el repunte que tuvo la RNN entre las épocas 20 y 30. La LSTM entrena de forma más estable, aunque más lenta.
+
+En conclusión, para series cortas y regulares una RNN simple puede ser suficiente y más eficiente. La LSTM se justifica cuando la predicción depende de información lejana en la secuencia (texto, series con estacionalidad larga, eventos espaciados), escenario donde la RNN simple sí sufriría la amnesia matemática.
 
 ## Conclusiones
 
 1. Los datos de una RNN en PyTorch con `batch_first=True` tienen la forma `[batch, seq_len, features]`, y elegir mal estas dimensiones es el error más común al implementar estas redes.
 2. El número de parámetros crece de forma aproximadamente cuadrática con `hidden_size`, y la LSTM cuadruplica los parámetros recurrentes de la RNN.
-3. Aumentar la longitud de la secuencia expone el problema de gradientes desvanecientes de la RNN simple.
-4. La LSTM, gracias a sus compuertas y a su estado de celda, mantiene mejor la información a largo plazo y se ajusta mejor a la serie con ventanas largas.
+3. Aumentar la longitud de la secuencia a 50 pasos volvió menos estable el entrenamiento de la RNN simple (repunte de la pérdida entre las épocas 20 y 30), aunque la pérdida final fue menor porque la ventana larga aporta más contexto de la onda.
+4. En esta serie, la RNN simple superó a la LSTM en 50 épocas (MSE 0.000812 frente a 0.001212). La LSTM convergió de forma más estable pero más lenta, y su ventaja teórica sobre la memoria de largo plazo no se manifiesta en una tarea donde basta con los pasos recientes.
+5. Elegir arquitectura depende del problema: más capacidad y más compuertas no garantizan mejor resultado si la tarea no las necesita.
